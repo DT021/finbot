@@ -190,6 +190,9 @@ Zumo32U4Motors motors;
 const int16_t fastSpeed = 400;
 const int16_t mediumSpeed = 200;
 const int16_t slowSpeed = 100;
+const int16_t veerSpeedProwl = 350;
+const int16_t veerSpeedBorderFollow = 250;
+const int16_t veerSpeedBorderFollowDetection = 100;
 
 void setTurnLeft() {
   motors.setSpeeds(-mediumSpeed, mediumSpeed);
@@ -201,6 +204,10 @@ void setTurnRight() {
 
 void setFastForward() {
   motors.setSpeeds(fastSpeed, fastSpeed);
+}
+
+void setMediumForward() {
+  motors.setSpeeds(mediumSpeed, mediumSpeed);
 }
 
 void setSlowForward() {
@@ -241,6 +248,7 @@ enum class State {
   ChargeTarget,
   EvasiveAction,
   EdgeRecovery,
+  BorderFollow,
   Debug
 };
 
@@ -265,6 +273,8 @@ void changeState(State state)  {
     break;
     case State::EdgeRecovery: lcd.print(F("Edge"));
     break;
+    case State::BorderFollow: lcd.print(F("Border"));
+    break;
     case State::Debug: lcd.print(F("Debug"));
     break;
     default: lcd.print(F("Unknown"));
@@ -278,49 +288,42 @@ uint64_t getStateDuration() {
 //
 
 // Charge bot
+
+enum class VeerState {
+  Left,
+  Right
+};
+
+VeerState currentVeerState;
+
 void modeALoop() {
   SensorReading lineReading = readLineSensor();
   SensorReading proximityReading = readProximitySensor();
   switch (currentState) {
-    case State::Scan: {
-      setStop();
-      bool targetFound = false;
-      for (uint8_t i = 0; i < 8; i++) {
-        turn(45);
-        targetFound = readProximitySensor() != SensorReading::None;
-        if (targetFound) {
-          break;
-        }
-      }
-      if (targetFound) {
-        changeState(State::ChargeTarget);
-      } else {
-        changeState(State::Prowl);
-      }
-    }
-    break;
 
     case State::Prowl: {
       bool lineFound = lineReading != SensorReading::None;
       bool targetFound = proximityReading != SensorReading::None;
+
       if (lineFound) {
-        changeState(State::EdgeRecovery);
+        if (lineReading == SensorReading::Left) {
+          currentVeerState = VeerState::Right;
+          motors.setSpeeds(veerSpeedBorderFollowDetection, fastSpeed);
+        } else if (lineReading == SensorReading::Right) {
+          currentVeerState = VeerState::Left;
+          motors.setSpeeds(fastSpeed, veerSpeedBorderFollowDetection);
+        } else if (lineReading == SensorReading::Center) {
+          changeState(State::EdgeRecovery);
+        }
       } else if (targetFound) {
         changeState(State::ChargeTarget);
-      } else if (getStateDuration() > 10000) {
-        changeState(State::Scan);
+      } else {
+        if (currentVeerState == VeerState::Left) {
+          motors.setSpeeds(veerSpeedBorderFollow, fastSpeed);
+        } else {
+          motors.setSpeeds(fastSpeed, veerSpeedBorderFollow);
+        }
       }
-      setSlowForward();
-    }
-    break;
-
-    case State::Rotate2Target: {
-      changeState(State::Scan);
-    }
-    break;
-
-    case State::EvasiveAction: {
-      changeState(State::Scan);
     }
     break;
 
@@ -328,25 +331,44 @@ void modeALoop() {
       bool lineFound = lineReading != SensorReading::None;
       bool targetFound = proximityReading != SensorReading::None;
       if (targetFound) {
-        setFastForward();
+        if (proximityReading == SensorReading::FrontLeft) {
+          motors.setSpeeds(veerSpeedProwl, fastSpeed);
+        } else if (proximityReading == SensorReading::FrontRight) {
+          motors.setSpeeds(fastSpeed, veerSpeedProwl);
+        } else {
+          motors.setSpeeds(fastSpeed, fastSpeed);
+        }
       } else if (lineFound) {
         changeState(State::EdgeRecovery);
-      } else if (getStateDuration() > 2000) {
-        changeState(State::Scan);
       }
     }
     break;
 
     case State::EdgeRecovery: {
-      setSlowBackward();
-      delay(1000);
-      turn(180);
-      delay(1000);
-      changeState(State::Scan);
+      if (lineReading == SensorReading::Left) {
+        setFastBackward();
+        delay(200);
+        turn(45);
+        currentVeerState = VeerState::Right;
+      } else if (lineReading == SensorReading::Right) {
+        setFastBackward();
+        delay(200);
+        turn(-45);
+        currentVeerState = VeerState::Left;
+      } else if (lineReading == SensorReading::Center) {
+        setFastBackward();
+        delay(200);
+        turn(90);
+        currentVeerState = VeerState::Right;
+      } else {
+        changeState(State::BorderFollow);
+      }
     }
     break;
 
-    default:
+    default: {
+      changeState(State::Prowl);
+    }
     break;
   }
 }
@@ -421,7 +443,7 @@ char mode = 'A';
 
 void setup() {
   randomSeed(analogRead(0));
-  setupLineSensor(false);
+  setupLineSensor(true);
   setupProximitySensor();
   setupTurnSensing();
 
@@ -434,9 +456,11 @@ void setup() {
   while (true) {
     if (buttonA.getSingleDebouncedPress()) {
       mode = 'A';
+      changeState(State::Prowl);
       break;
     } else if (buttonB.getSingleDebouncedPress()) {
       mode = 'B';
+      changeState(State::Prowl);
       break;
     } else if (buttonC.getSingleDebouncedPress()) {
       mode = 'C';
