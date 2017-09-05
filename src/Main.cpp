@@ -96,7 +96,7 @@ SensorReading readLineSensor() {
 
 // Proximity Sensing
 Zumo32U4ProximitySensors proximitySensors;
-const uint8_t PROXIMITY_SENSOR_THRESHOLD = 5;
+const uint8_t PROXIMITY_SENSOR_THRESHOLD = 4;
 uint8_t proximitySensorLeft;
 uint8_t proximitySensorFrontLeft;
 uint8_t proximitySensorFrontRight;
@@ -189,7 +189,7 @@ int32_t readTurnSensor() {
 Zumo32U4Motors motors;
 const int16_t fastSpeed = 400;
 const int16_t slowSpeed = 100;
-const int16_t veerChargeSpeed = 350;
+const int16_t veerChargeSpeed = 300;
 const int16_t veerBorderFollowSpeed = 250;
 const int16_t veerBorderFollowDetectionSpeed = 100;
 
@@ -301,23 +301,9 @@ void modeALoop() {
       bool targetFound = proximityReading != SensorReading::None;
 
       if (lineFound) {
-        if (lineReading == SensorReading::Left) {
-          currentVeerState = VeerState::Right;
-          motors.setSpeeds(fastSpeed, veerBorderFollowDetectionSpeed);
-        } else if (lineReading == SensorReading::Right) {
-          currentVeerState = VeerState::Left;
-          motors.setSpeeds(veerBorderFollowDetectionSpeed, fastSpeed);
-        } else if (lineReading == SensorReading::Center) {
-          changeState(State::EdgeRecovery);
-        }
+        changeState(State::EdgeRecovery);
       } else if (targetFound) {
         changeState(State::ChargeTarget);
-      } else if (getStateDuration() > 1000) {
-        if (currentVeerState == VeerState::Right) {
-          turn(90);
-        } else {
-          turn(-90);
-        }
       } else {
         if (currentVeerState == VeerState::Left) {
           motors.setSpeeds(veerBorderFollowSpeed, fastSpeed);
@@ -349,19 +335,23 @@ void modeALoop() {
 
     case State::EdgeRecovery: {
       if (lineReading == SensorReading::Left) {
-        setFastBackward();
-        delay(200);
-        turn(45);
+        if (random(0, 15) == 0) {
+          turn(90);
+        } else {
+          turn(5);
+        }
         currentVeerState = VeerState::Right;
       } else if (lineReading == SensorReading::Right) {
-        setFastBackward();
-        delay(200);
-        turn(-45);
+        if (random(0, 15) == 0) {
+          turn(-90);
+        } else {
+          turn(-5);
+        }
         currentVeerState = VeerState::Left;
       } else if (lineReading == SensorReading::Center) {
         setFastBackward();
-        delay(200);
-        if (random(0, 1)) {
+        delay(100);
+        if (random(0, 2)) {
           turn(90);
           currentVeerState = VeerState::Right;
         } else {
