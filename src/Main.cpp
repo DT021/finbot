@@ -66,9 +66,9 @@ void setupLineSensor(bool useWhiteLines) {
 SensorReading readLineSensor() {
   static unsigned int lineSensorValues[3];
   lineSensors.read(lineSensorValues, useEmitters ? QTR_EMITTERS_ON : QTR_EMITTERS_OFF);
-  lineSensorRight = lineSensorValues[0];
+  lineSensorLeft = lineSensorValues[0];
   lineSensorCenter = lineSensorValues[1];
-  lineSensorLeft = lineSensorValues[2];
+  lineSensorRight = lineSensorValues[2];
   SensorReading reading = SensorReading::None;
   if (whiteLines) {
     if ((lineSensorRight < LINE_SENSOR_THRESHOLD && lineSensorLeft < LINE_SENSOR_THRESHOLD) || lineSensorCenter < LINE_SENSOR_THRESHOLD) {
@@ -188,26 +188,21 @@ int32_t readTurnSensor() {
 // Motor
 Zumo32U4Motors motors;
 const int16_t fastSpeed = 400;
-const int16_t mediumSpeed = 200;
 const int16_t slowSpeed = 100;
-const int16_t veerSpeedProwl = 350;
-const int16_t veerSpeedBorderFollow = 250;
-const int16_t veerSpeedBorderFollowDetection = 100;
+const int16_t veerChargeSpeed = 350;
+const int16_t veerBorderFollowSpeed = 250;
+const int16_t veerBorderFollowDetectionSpeed = 100;
 
 void setTurnLeft() {
-  motors.setSpeeds(-mediumSpeed, mediumSpeed);
+  motors.setSpeeds(-fastSpeed, fastSpeed);
 }
 
 void setTurnRight() {
-  motors.setSpeeds(mediumSpeed, -mediumSpeed);
+  motors.setSpeeds(fastSpeed, -fastSpeed);
 }
 
 void setFastForward() {
   motors.setSpeeds(fastSpeed, fastSpeed);
-}
-
-void setMediumForward() {
-  motors.setSpeeds(mediumSpeed, mediumSpeed);
 }
 
 void setSlowForward() {
@@ -231,10 +226,10 @@ void turn(int16_t degrees) {
   resetTurnSensor();
   if (degrees > 0) {
     setTurnRight();
-    while (readTurnSensor() < degrees); // Turn for max one sec
+    while (readTurnSensor() < degrees);
   } else if (degrees < 0) {
     setTurnLeft();
-    while (readTurnSensor() > degrees); // Turn for max one sec
+    while (readTurnSensor() > degrees);
   }
   setStop();
 }
@@ -301,27 +296,33 @@ void modeALoop() {
   SensorReading proximityReading = readProximitySensor();
   switch (currentState) {
 
-    case State::Prowl: {
+    case State::BorderFollow: {
       bool lineFound = lineReading != SensorReading::None;
       bool targetFound = proximityReading != SensorReading::None;
 
       if (lineFound) {
         if (lineReading == SensorReading::Left) {
           currentVeerState = VeerState::Right;
-          motors.setSpeeds(veerSpeedBorderFollowDetection, fastSpeed);
+          motors.setSpeeds(fastSpeed, veerBorderFollowDetectionSpeed);
         } else if (lineReading == SensorReading::Right) {
           currentVeerState = VeerState::Left;
-          motors.setSpeeds(fastSpeed, veerSpeedBorderFollowDetection);
+          motors.setSpeeds(veerBorderFollowDetectionSpeed, fastSpeed);
         } else if (lineReading == SensorReading::Center) {
           changeState(State::EdgeRecovery);
         }
       } else if (targetFound) {
         changeState(State::ChargeTarget);
+      } else if (getStateDuration() > 1000) {
+        if (currentVeerState == VeerState::Right) {
+          turn(90);
+        } else {
+          turn(-90);
+        }
       } else {
         if (currentVeerState == VeerState::Left) {
-          motors.setSpeeds(veerSpeedBorderFollow, fastSpeed);
+          motors.setSpeeds(veerBorderFollowSpeed, fastSpeed);
         } else {
-          motors.setSpeeds(fastSpeed, veerSpeedBorderFollow);
+          motors.setSpeeds(fastSpeed, veerBorderFollowSpeed);
         }
       }
     }
@@ -332,14 +333,16 @@ void modeALoop() {
       bool targetFound = proximityReading != SensorReading::None;
       if (targetFound) {
         if (proximityReading == SensorReading::FrontLeft) {
-          motors.setSpeeds(veerSpeedProwl, fastSpeed);
+          motors.setSpeeds(veerChargeSpeed, fastSpeed);
         } else if (proximityReading == SensorReading::FrontRight) {
-          motors.setSpeeds(fastSpeed, veerSpeedProwl);
+          motors.setSpeeds(fastSpeed, veerChargeSpeed);
         } else {
           motors.setSpeeds(fastSpeed, fastSpeed);
         }
       } else if (lineFound) {
         changeState(State::EdgeRecovery);
+      } else {
+        changeState(State::BorderFollow);
       }
     }
     break;
@@ -358,8 +361,13 @@ void modeALoop() {
       } else if (lineReading == SensorReading::Center) {
         setFastBackward();
         delay(200);
-        turn(90);
-        currentVeerState = VeerState::Right;
+        if (random(0, 1)) {
+          turn(90);
+          currentVeerState = VeerState::Right;
+        } else {
+          turn(-90);
+          currentVeerState = VeerState::Left;
+        }
       } else {
         changeState(State::BorderFollow);
       }
@@ -367,7 +375,7 @@ void modeALoop() {
     break;
 
     default: {
-      changeState(State::Prowl);
+      changeState(State::BorderFollow);
     }
     break;
   }
