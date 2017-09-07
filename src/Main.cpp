@@ -188,9 +188,9 @@ int32_t readTurnSensor() {
 // Motor
 Zumo32U4Motors motors;
 const int16_t fastSpeed = 400;
-const int16_t slowSpeed = 100;
+const int16_t slowSpeed = 300;
 const int16_t veerChargeSpeed = 300;
-const int16_t veerBorderFollowSpeed = 250;
+const int16_t veerBorderFollowSpeed = 300;
 const int16_t veerBorderFollowDetectionSpeed = 100;
 
 void setTurnLeft() {
@@ -230,6 +230,19 @@ void turn(int16_t degrees) {
   } else if (degrees < 0) {
     setTurnLeft();
     while (readTurnSensor() > degrees);
+  }
+  setStop();
+}
+
+void turnUntilNoLine(int16_t degrees) {
+  degrees = max(min(degrees, 179), -179); // Turn sensor handles +-179
+  resetTurnSensor();
+  if (degrees > 0) {
+    setTurnRight();
+    while (readLineSensor() != SensorReading::None);
+  } else if (degrees < 0) {
+    setTurnLeft();
+    while (readLineSensor() != SensorReading::None);
   }
   setStop();
 }
@@ -335,14 +348,14 @@ void modeALoop() {
 
     case State::EdgeRecovery: {
       if (lineReading == SensorReading::Left) {
-        if (random(0, 15) == 0) {
+        if (random(0, 10) == 0) {
           turn(90);
         } else {
           turn(5);
         }
         currentVeerState = VeerState::Right;
       } else if (lineReading == SensorReading::Right) {
-        if (random(0, 15) == 0) {
+        if (random(0, 10) == 0) {
           turn(-90);
         } else {
           turn(-5);
@@ -377,46 +390,65 @@ void modeBLoop() {
   SensorReading proximityReading = readProximitySensor();
   switch (currentState) {
     case State::Scan: {
-      setStop();
-      bool targetFound = false;
-      for (uint8_t i = 0; i < 8; i++) {
-        turn(45);
-        targetFound = proximityReading != SensorReading::None;
-        if (targetFound) {
-          break;
-        }
-      }
+      bool targetFound = proximityReading != SensorReading::None;
       if (targetFound) {
-        changeState(State::EdgeRecovery);
+        changeState(State::ChargeTarget);
+      } else if (getStateDuration() > 1000) {
+        changeState(State::Prowl);
       } else {
-        changeState(State::EvasiveAction);
+        if (currentVeerState == VeerState::Left) {
+          motors.setSpeeds(veerChargeSpeed, -veerChargeSpeed);
+        } else {
+          motors.setSpeeds(-veerChargeSpeed, veerChargeSpeed);
+        }
       }
     }
     break;
 
-    case State::EvasiveAction: {
+    case State::ChargeTarget: {
       bool lineFound = lineReading != SensorReading::None;
-      bool escapeLeft = proximityReading == SensorReading::FrontLeft;
-      bool escapeCenter = proximityReading == SensorReading::Center;
-      bool escapeRight = proximityReading == SensorReading::FrontRight;
-      if (lineFound) {
+      bool targetFound = proximityReading != SensorReading::None;
+      if (targetFound) {
+        if (proximityReading == SensorReading::FrontLeft) {
+          motors.setSpeeds(veerChargeSpeed, fastSpeed);
+        } else if (proximityReading == SensorReading::FrontRight) {
+          motors.setSpeeds(fastSpeed, veerChargeSpeed);
+        } else {
+          motors.setSpeeds(fastSpeed, fastSpeed);
+        }
+      } else if (lineFound) {
         changeState(State::EdgeRecovery);
-      } else if (escapeLeft) {
-        turn(45);
-      } else if (escapeRight) {
-        turn(-45);
-      } else if (escapeCenter) {
-        turn(90);
+      } else {
+        changeState(State::Prowl);
       }
-      setSlowForward();
+    }
+    break;
+
+    case State::Prowl: {
+      bool lineFound = lineReading != SensorReading::None;
+      bool targetFound = proximityReading != SensorReading::None;
+      if (targetFound) {
+        changeState(State::ChargeTarget);
+      } else if (lineFound) {
+        changeState(State::EdgeRecovery);
+      } else if (random(0, 50) == 0) {
+        if (random(0, 2) == 0) {
+          currentVeerState = VeerState::Left;
+        } else {
+          currentVeerState = VeerState::Right;
+        }
+        changeState(State::Scan);
+      } else {
+        setSlowForward();
+      }
     }
     break;
 
     case State::EdgeRecovery: {
-      setSlowBackward();
-      delay(1000);
+      setFastBackward();
+      delay(200);
       turn(180);
-      changeState(State::EvasiveAction);
+      changeState(State::Prowl);
     }
     break;
 
@@ -447,9 +479,9 @@ void setup() {
 
   lcd.clear();
   lcd.gotoXY(0, 0);
-  lcd.print("Can haz");
+  lcd.print(F("Can haz"));
   lcd.gotoXY(0, 1);
-  lcd.print("A B or C");
+  lcd.print(F("A B or C"));
 
   while (true) {
     if (buttonA.getSingleDebouncedPress()) {
@@ -467,7 +499,10 @@ void setup() {
     delay(100);
   }
   lcd.clear();
-  delay(2000);
+  for (int i = 0; i < 3; i++) {
+    buzzer.playNote(NOTE_G(3), 200, 15);
+    delay(1000);
+  }
   buzzer.playFromProgramSpace(CHARGE_MELODY);
 }
 
